@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>參觀工廠預約</title>
+  <style>
+    /* Cloudflare 版樣式：保持 LINE 風格 */
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f2f2f2; padding: 20px; margin: 0; }
+    .container { background-color: white; border-radius: 10px; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
+    h2 { color: #06C755; text-align: center; margin-bottom: 25px; font-weight: bold; }
+    label { display: block; margin-top: 15px; font-weight: bold; color: #333; font-size: 14px; }
+    input, select { width: 100%; padding: 12px; margin-top: 8px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; background: #fafafa; }
+    button { width: 100%; background-color: #06C755; color: white; border: none; padding: 15px; font-size: 16px; border-radius: 8px; margin-top: 30px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+    button:active { background-color: #05a546; }
+    button:disabled { background-color: #ccc; cursor: not-allowed; }
+    .hidden { display: none; }
+    .loading { text-align: center; color: #666; font-size: 14px; margin-top: 10px; display: none; }
+  </style>
+</head>
+<body>
+
+  <div class="container" id="formPage">
+    <h2>🏭 參觀工廠預約</h2>
+    
+    <form id="bookingForm">
+      <label>您的姓名</label>
+      <input type="text" name="name" required placeholder="請輸入真實姓名">
+      
+      <label>聯絡電話</label>
+      <input type="tel" name="phone" required placeholder="09xxxxxxxx">
+      
+      <label>選擇場次</label>
+      <select id="sessionSelect" name="session" required onchange="checkQuota()">
+        <option value="" disabled selected>連線讀取中...</option>
+      </select>
+      
+      <label>報名人數 (含本人)</label>
+      <select name="count" id="countSelect" required>
+        <option value="1">1 人</option>
+      </select>
+      
+      <button type="button" onclick="submitForm()" id="submitBtn">立即預約</button>
+      <div class="loading" id="loadingMsg">資料傳輸中，請稍候...</div>
+    </form>
+  </div>
+
+  <div class="container hidden" id="successPage" style="text-align: center; padding: 50px 20px;">
+    <div style="font-size: 50px;">✅</div>
+    <h2 style="color: #333; margin-top: 20px;">預約成功！</h2>
+    <p style="color: #666; line-height: 1.6;">我們已收到您的資料。<br>請留意手機簡訊或行前通知。</p>
+    <button onclick="window.location.reload()" style="background-color: #eee; color: #333; margin-top: 20px;">返回首頁</button>
+  </div>
+
+  <script>
+    // ⚠️ 請在這裡貼上您的 Google Apps Script 部署網址
+    var API_URL = "您的GAS網址(結尾是/exec)"; 
+
+    // 1. 初始化：讀取場次
+    window.onload = function() {
+      // 呼叫 GAS 的 doGet
+      fetch(API_URL + "?op=get_sessions")
+        .then(res => res.json())
+        .then(sessions => {
+            sessionData = sessions;
+            renderSessions(sessions);
+        })
+        .catch(err => {
+            alert("無法連線到資料庫，請檢查網路或是 GAS 網址設定");
+            console.error(err);
+        });
+    };
+
+    var sessionData = [];
+
+    function renderSessions(sessions) {
+      var select = document.getElementById("sessionSelect");
+      select.innerHTML = '<option value="" disabled selected>請選擇場次</option>';
+      
+      sessions.forEach(function(s) {
+        var text = s.name + " (剩餘 " + s.left + " 名額)";
+        if (s.left <= 0) text = s.name + " (已額滿)";
+        
+        var option = document.createElement("option");
+        option.text = text;
+        option.value = s.name;
+        if(s.left <= 0) option.disabled = true;
+        select.add(option);
+      });
+    }
+
+    function checkQuota() {
+        var selectedName = document.getElementById("sessionSelect").value;
+        var selectedSession = sessionData.find(s => s.name === selectedName);
+        if (selectedSession) {
+            var countSelect = document.getElementById("countSelect");
+            countSelect.innerHTML = "";
+            var max = Math.min(4, selectedSession.left); 
+            for(var i=1; i<=max; i++) {
+                var opt = document.createElement("option");
+                opt.value = i;
+                opt.text = i + " 人";
+                countSelect.add(opt);
+            }
+        }
+    }
+
+    function submitForm() {
+      var btn = document.getElementById("submitBtn");
+      var loading = document.getElementById("loadingMsg");
+      var form = document.getElementById("bookingForm");
+      
+      if (!form.checkValidity()) {
+        alert("請填寫完整資料");
+        return;
+      }
+
+      // 準備資料
+      var formData = new FormData(form);
+
+      // UI 鎖定
+      btn.disabled = true;
+      btn.innerText = "預約中...";
+      loading.style.display = "block";
+
+      // 2. 送出資料：使用 POST
+      fetch(API_URL, {
+        method: "POST",
+        body: formData
+      })
+      .then(res => res.json())
+      .then(result => {
+        if (result.status === "success") {
+            document.getElementById("formPage").classList.add("hidden");
+            document.getElementById("successPage").classList.remove("hidden");
+        } else if (result.status === "full") {
+            alert("哎呀！慢了一步，該場次剛剛額滿了！");
+            window.location.reload();
+        } else {
+            alert("系統錯誤：" + result.msg);
+            resetBtn();
+        }
+      })
+      .catch(err => {
+        // GAS 跨域 redirect 常見現象，如果回傳成功通常是200，但有時會有 CORS 警告
+        // 這裡做一個簡單處理，假設沒噴錯就是通的
+        console.error(err);
+        alert("連線異常，請稍後再試");
+        resetBtn();
+      });
+    }
+
+    function resetBtn() {
+        var btn = document.getElementById("submitBtn");
+        var loading = document.getElementById("loadingMsg");
+        btn.disabled = false;
+        btn.innerText = "立即預約";
+        loading.style.display = "none";
+    }
+  </script>
+</body>
+</html>
